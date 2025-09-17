@@ -1,4 +1,4 @@
-groww-api
+growwapi
 pandas
 numpy
 python-dotenv

@@ -50,7 +50,7 @@ def connect_api():
         totp = totp_gen.now()
 
         access_token = GrowwAPI.get_access_token(api_key=API_KEY, totp=totp)
-        groww = GrowwAPI(access_token['access_token'])
+        groww = GrowwAPI(access_token)
 
         logging.info("Successfully connected to Groww API.")
         return groww
