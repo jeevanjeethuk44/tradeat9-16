@@ -1,0 +1,6 @@
+groww-api
+pandas
+numpy
+python-dotenv
+pyotp
+schedule
