@@ -18,12 +18,12 @@ load_dotenv()
 API_KEY = os.getenv("GROWW_API_KEY")
 SECRET_CODE = os.getenv("GROWW_SECRET_CODE")
 
-# Trading parameters
-PREMIUM_LOWER_BOUND = 50
-PREMIUM_UPPER_BOUND = 60
+# Trading parameters - FIXED: Use proper market hours
+PREMIUM_LOWER_BOUND = 30
+PREMIUM_UPPER_BOUND = 50
 TARGET_PREMIUM = (PREMIUM_LOWER_BOUND + PREMIUM_UPPER_BOUND) / 2
-TRADE_TIME = "09:16"
-EXIT_TIME = "09:20"
+TRADE_TIME = "09:16"  # 9:15 AM IST (market opens at 9:15 AM)
+EXIT_TIME = "09:18"   # 9:20 AM IST
 
 # File to store state of open trades
 STATE_FILE = "trades.json"
@@ -37,6 +37,17 @@ logging.basicConfig(
         logging.StreamHandler()
     ]
 )
+
+def log_current_time_and_schedule():
+    """Helper function to debug scheduling issues"""
+    now = datetime.datetime.now()
+    logging.info(f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S %A')}")
+    logging.info(f"Current timezone: {time.tzname}")
+    
+    # Log next scheduled runs
+    jobs = schedule.get_jobs()
+    for job in jobs:
+        logging.info(f"Next run: {job.next_run} for job: {job.job_func.__name__}")
 
 def connect_api():
     """Establishes a connection to the Groww API using TOTP."""
@@ -116,7 +127,9 @@ def find_best_option(options_df, ltp_data):
 
 def place_trade_strategy():
     """The main logic to find and buy CE and PE options."""
-    logging.info("--- Starting 9:16 AM trade strategy ---")
+    logging.info("--- Starting trade strategy ---")
+    log_current_time_and_schedule()  # Debug info
+    
     groww = connect_api()
     if not groww:
         return
@@ -182,7 +195,7 @@ def place_trade_strategy():
             logging.info(f"Placing BUY order for {trade['trading_symbol']}...")
             order_response = groww.place_order(
                 trading_symbol=trade['trading_symbol'],
-                quantity=int(trade['lot_size']),
+                quantity=int(trade['lot_size'])*2,
                 validity=groww.VALIDITY_DAY,
                 exchange=groww.EXCHANGE_NSE,
                 segment=groww.SEGMENT_FNO,
@@ -194,7 +207,7 @@ def place_trade_strategy():
             if order_response and order_response.get('groww_order_id'):
                 placed_trades.append({
                     'trading_symbol': trade['trading_symbol'],
-                    'lot_size': int(trade['lot_size']),
+                    'lot_size': int(trade['lot_size'])*2,
                     'groww_order_id': order_response['groww_order_id']
                 })
         except Exception as e:
@@ -207,7 +220,9 @@ def place_trade_strategy():
 
 def exit_trades():
     """The logic to sell all open positions from the state file."""
-    logging.info("--- Starting 9:20 AM exit strategy ---")
+    logging.info("--- Starting exit strategy ---")
+    log_current_time_and_schedule()  # Debug info
+    
     if not os.path.exists(STATE_FILE):
         logging.info("No state file found. No trades to exit.")
         return
@@ -245,21 +260,66 @@ def exit_trades():
     os.remove(STATE_FILE)
     logging.info(f"Exit process complete. State file '{STATE_FILE}' removed.")
 
+def test_schedule_immediately():
+    """Test function to run the strategy immediately"""
+    logging.info("TESTING: Running trade strategy immediately...")
+    place_trade_strategy()
+    time.sleep(10)  # Wait 10 seconds
+    logging.info("TESTING: Running exit strategy immediately...")
+    exit_trades()
 
 if __name__ == "__main__":
-    logging.info("Trader script started. Waiting for scheduled time...")
+    logging.info("Trader script started.")
+    log_current_time_and_schedule()
+    
+    # Check if it's a weekday and market hours
+    now = datetime.datetime.now()
+    if now.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        logging.warning("Today is a weekend. Markets are closed.")
+    
     logging.info(f"Buy orders will be placed at {TRADE_TIME} on weekdays.")
     logging.info(f"Sell orders will be placed at {EXIT_TIME} on weekdays.")
 
-    # Schedule the jobs
-    for day in [schedule.every().monday, schedule.every().tuesday, schedule.every().wednesday, schedule.every().thursday, schedule.every().friday]:
-        day.at(TRADE_TIME).do(place_trade_strategy)
-        day.at(EXIT_TIME).do(exit_trades)
+    # Clear any existing schedules
+    schedule.clear()
 
-    # For testing purposes, you can uncomment these lines to run the jobs quickly
+    # Schedule the jobs for weekdays only
+    schedule.every().monday.at(TRADE_TIME).do(place_trade_strategy)
+    schedule.every().tuesday.at(TRADE_TIME).do(place_trade_strategy)
+    schedule.every().wednesday.at(TRADE_TIME).do(place_trade_strategy)
+    schedule.every().thursday.at(TRADE_TIME).do(place_trade_strategy)
+    schedule.every().friday.at(TRADE_TIME).do(place_trade_strategy)
+    
+    schedule.every().monday.at(EXIT_TIME).do(exit_trades)
+    schedule.every().tuesday.at(EXIT_TIME).do(exit_trades)
+    schedule.every().wednesday.at(EXIT_TIME).do(exit_trades)
+    schedule.every().thursday.at(EXIT_TIME).do(exit_trades)
+    schedule.every().friday.at(EXIT_TIME).do(exit_trades)
+
+    # Uncomment the line below to test immediately
+    # test_schedule_immediately()
+
+    # For minute-based testing, uncomment these lines:
     # schedule.every(1).minutes.do(place_trade_strategy)
     # schedule.every(2).minutes.do(exit_trades)
 
+    # Log scheduled jobs
+    jobs = schedule.get_jobs()
+    logging.info(f"Scheduled {len(jobs)} jobs:")
+    for job in jobs:
+        logging.info(f"  - {job.job_func.__name__} at {job.next_run}")
+
+    # Main loop
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        try:
+            schedule.run_pending()
+            # Log every 10 minutes to show the script is alive
+            if datetime.datetime.now().minute % 10 == 0 and datetime.datetime.now().second == 0:
+                logging.info(f"Script running. Next job in: {schedule.idle_seconds()} seconds")
+            time.sleep(1)
+        except KeyboardInterrupt:
+            logging.info("Script interrupted by user. Exiting...")
+            break
+        except Exception as e:
+            logging.error(f"Unexpected error in main loop: {e}")
+            time.sleep(60)  # Wait 1 minute before continuing
