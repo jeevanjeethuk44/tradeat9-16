@@ -4,3 +4,5 @@ numpy
 python-dotenv
 pyotp
 schedule
+google-generativeai
+requests
