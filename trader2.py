@@ -51,6 +51,7 @@ def log_current_time_and_schedule():
 
 def connect_api():
     """Establishes a connection to the Groww API using TOTP."""
+    # Test comment for PR workflow.
     logging.info("Attempting to connect to Groww API...")
     try:
         if not API_KEY or not SECRET_CODE:
